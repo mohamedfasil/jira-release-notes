@@ -1,0 +1,15 @@
+name: "Mohamed Fasil"
+description: "Jira release notes generator"
+author: "Zee"
+inputs:
+  release_branch: # change this
+    required: true
+    description: "Release branch"
+    default: "default value if applicable"
+  base_branch: # change this
+    required: true
+    description: "Base branch (master / main)"
+    default: "master"
+runs:
+  using: "node16"
+  main: "dist/index.js"
