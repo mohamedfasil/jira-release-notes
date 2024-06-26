@@ -3,8 +3,69 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import * as core from '@actions/core'
 import * as child from 'child_process'
+const nodemailer = require('nodemailer')
 
 import Jira from './jira'
+
+const transporter = (host, port = 587, secure = false, username, password) =>
+  nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: {
+      user: username,
+      pass: password
+    }
+  })
+
+const emailTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    table {
+      font-family: arial, sans-serif;
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    td, th {
+      border: 1px solid #dddddd;
+      text-align: left;
+      padding: 8px;
+    }
+  </style>
+</head>
+<body>
+  <% if (Object.values(validTicketsList).length > 0) { %>
+    <% Object.values(validTicketsList).forEach((issueTypeDetails) => { %>
+      <table>
+        <thead>
+          <tr>
+            <th>Issue Type</th>
+            <th>JIRA Ticket</th>
+            <th>Summary</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% issueTypeDetails.data.forEach((jiraTicketDetails) => { %>
+            <tr>
+              <td><%= jiraTicketDetails[0] %></td>
+              <td><%= jiraTicketDetails[1] %></td>
+              <td><%= jiraTicketDetails[2] %></td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+      <br/>
+      <br/>
+    <% }); %>
+  <% } else { %>
+    <p>No data available.</p>
+  <% } %>
+</body>
+</html>
+`
 
 const template = `
 
@@ -25,12 +86,63 @@ Other Commits
 
 `
 
+const getValidJiraTickets = (ticketList, jiraConfig) => {
+  let jiraTickets = {}
+  Object.values(ticketList).forEach((ticket: any) => {
+    const issuetype = ticket.fields.issuetype.name
+      ?.replace(/\W/g, '-')
+      ?.toLowerCase()
+    if (!jiraTickets[issuetype]) {
+      jiraTickets[issuetype] = {key: issuetype, data: []}
+    }
+    jiraTickets[issuetype].data = [
+      ...jiraTickets[issuetype].data,
+      [issuetype, `${jiraConfig.baseUrl}/browse/${ticket.key}`, ticket.fields.summary]
+    ]
+  })
+
+  const bugIssueType = jiraTickets['bug']
+  if (bugIssueType) {
+    delete jiraTickets['bug']
+    jiraTickets['bug']= bugIssueType;
+  }
+
+  return jiraTickets;
+}
+
+const sendMail = async (triggerMail, fromMail, toMail, emailHtmlTempalate) => {
+  try {
+    await triggerMail.sendMail({
+      from: fromMail,
+      to: toMail,
+      subject: 'JIRA Release Notes',
+      html: emailHtmlTempalate
+    })
+  } catch (e) {
+    console.log('error in triggering mail', e)
+  }
+}
+
 async function run(): Promise<void> {
   try {
     const RegExpFromString = require('regexp-from-string')
 
     const base: string = core.getInput('base_branch')
     const release: string = core.getInput('release_branch')
+    const smtpHost: string = core.getInput('smtp_host')
+    const smtpPort: number = parseInt(core.getInput('smtp_port'))
+    const smtpUsername: string = core.getInput('smtp_username')
+    const smtpPassword: string = core.getInput('smtp_password')
+    const fromMail: string = core.getInput('from_mail')
+    const toMail: string = core.getInput('to_mail')
+    const triggerMail = transporter(
+      smtpHost,
+      smtpPort,
+      false,
+      smtpUsername,
+      smtpPassword
+    )
+
     const jiraConfig = {
       host: core.getInput('jira_host'),
       email: core.getInput('jira_email'),
@@ -53,19 +165,24 @@ async function run(): Promise<void> {
         const jira = new Jira(jiraConfig)
         core.debug(`Getting range ${range.from}...${range.to} commit logs`)
         const commitLogs = await source.getCommitLogs('./', range)
-        //core.debug(commitLogs)
         const changelog = await jira.generate(commitLogs)
         const data = await transformCommitLogs(changelog, jiraConfig)
-        console.log('changelog geenrated')
         const ejs = require('ejs')
+        const shouldEmailBeTriggered =
+          smtpUsername && smtpPassword && fromMail && toMail
         const Entities = require('html-entities')
-
-        const changelogMessage = ejs.render(template, data)
+        const ticketsTemplate = shouldEmailBeTriggered
+          ? emailTemplate
+          : template
+        const table = ejs.render(ticketsTemplate, data)
         const entitles = new Entities.AllHtmlEntities()
+        const finalTemplate = entitles.decode(table)
         console.log('Changelog message entry:')
-        console.log(entitles.decode(changelogMessage))
-
-        core.setOutput('changelog_message', changelogMessage)
+        console.log(entitles.decode(table))
+        if (shouldEmailBeTriggered) {
+          sendMail(triggerMail, fromMail, toMail, finalTemplate)
+        }
+        core.setOutput('changelog_message', table)
       }
     })
     core.debug(`Base brnach ${base}; base branch ${release}`)
@@ -85,12 +202,14 @@ async function transformCommitLogs(logs, jiraConfig) {
     })
     return all
   }, {})
+
   const ticketList = _.sortBy(
     Object.values(ticketHash),
     ticket => ticket.fields.issuetype.name
   )
 
-  // Output filtered data
+  const validTicketsList = getValidJiraTickets(ticketList, jiraConfig)
+
   return {
     commits: {
       all: logs,
@@ -100,7 +219,8 @@ async function transformCommitLogs(logs, jiraConfig) {
     tickets: {
       all: ticketList
     },
-    jira: jiraConfig
+    jira: jiraConfig,
+    validTicketsList
   }
 }
 

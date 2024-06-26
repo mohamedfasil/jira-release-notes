@@ -1,6 +1,6 @@
 {
   "name": "jira-release-notes",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Jira release notes generator",
   "main": "lib/main.js",
@@ -28,6 +28,7 @@
     "@actions/core": "^1.10.0",
     "jira-changelog": "^2.2.0",
     "jira-client": "^8.2.2",
+    "nodemailer": "^6.9.14",
     "promise-throttle": "^1.1.2",
     "regexp-from-string": "^0.1.0"
   },

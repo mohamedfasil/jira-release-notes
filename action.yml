@@ -24,6 +24,24 @@ inputs:
   jira_ticket_id_pattern:
     required: true
     description: "Jira Ticket pattern"
+  smtp_host:   
+    required: false
+    description: "SMTP Host"
+  smtp_port:   
+    required: false
+    description: "SMTP Port(Default is 587)"
+  smtp_username:   
+    required: false
+    description: "SMTP Username"
+  smtp_password:
+    required: false
+    description: "SMTP Password"
+  from_mail:
+    required: false
+    description: "Sender Email"
+  to_mail:
+    required: false
+    description: "Receiver Email" 
 runs:
   using: "node16"
   main: "dist/index.js"
